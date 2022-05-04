@@ -22,12 +22,13 @@ all_names = [ \
     #"SingleTiling3DPeel",
     #"SingleTiling3DPad",
     #"DoubleTile3DPeel",
+    "DoubleTile3DNoPad",
     "DoubleTile3DPad",
             ]
 
 all_experts = [
     # Note: `\` char at the end of next line prevents formatter reflows, keep it.
-    e.print_ir(after_all=True, at_begin=True, llvm=False) for e in [ \
+    e.print_ir(after_all=False, at_begin=False, llvm=False) for e in [ \
         # Tile(fun_name=fun_name,
         #      op_name=op_name,
         #      #           N  H  W  C  KH  KW  F
@@ -67,12 +68,26 @@ all_experts = [
           .then(Tile(fun_name,
                      op_name,
                      tile_sizes=[1, 1, 8, 32, 1, 1, 8]))
-          #.then(Pad(fun_name,
-          #          op_name,
-          #          padding_values=[0.0, 0.0, 0.0],
-          #          padding_dimensions=[0, 1, 2, 3, 4, 5, 6],
-          #          pack_paddings=[1, 0, 0],
-          #          hoist_paddings=[4, 0, 0]))
+          .then(DecomposeToLowerDimensionalNamedOp())
+          .then(Vectorize(fun_name, '', vectorize_paddings=True))
+          .then(LoweringOnlyExpert(fun_name,
+                                   op_name,
+                                   split_transfers='none',
+                                   transpose_lowering='shuffle',
+                                   unroll_vector_transfers=True)),
+        Tile(fun_name,
+             op_name,
+             #           N  H  W  F  KH  KW  C
+             tile_sizes=[1, 32, 32, 32, 3, 3, 64])
+          .then(Tile(fun_name,
+                     op_name,
+                     tile_sizes=[1, 1, 8, 32, 1, 1, 8]))
+          .then(Pad(fun_name,
+                    op_name,
+                    padding_values=[0.0, 0.0, 0.0],
+                    padding_dimensions=[0, 1, 2, 3, 4, 5, 6],
+                    pack_paddings=[1, 0, 0],
+                    hoist_paddings=[4, 0, 0]))
           .then(DecomposeToLowerDimensionalNamedOp())
           .then(Vectorize(fun_name, '', vectorize_paddings=True))
           .then(LoweringOnlyExpert(fun_name,
@@ -95,13 +110,13 @@ def main():
   # Specify default configuration and parse command line.
   args = test_argparser(
       "conv 2d benchmark",
-      default_n_iters=100,
+      default_n_iters=10000,
       #  N   H   W   C  KH  KW   F     st      dil
       default_problem_sizes_list=[
           [8, 16, 16, 32, 3, 3, 64, [1, 1], [1, 1]],
-          #[8, 16, 16, 32, 3, 3, 64, [1, 2], [1, 2]],
-          #[8, 16, 16, 32, 3, 3, 64, [2, 1], [1, 2]],
-          #[8, 16, 16, 32, 3, 3, 64, [2, 2], [2, 2]],
+          [8, 16, 16, 32, 3, 3, 64, [1, 2], [1, 2]],
+          [8, 16, 16, 32, 3, 3, 64, [2, 1], [1, 2]],
+          [8, 16, 16, 32, 3, 3, 64, [2, 2], [2, 2]],
       ],
       default_expert_list=all_names,
       default_dynamic_at_compile_time_list=[ \
